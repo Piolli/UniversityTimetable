@@ -7,6 +7,7 @@ import com.android.volley.Response
 import com.android.volley.toolbox.StringRequest
 import com.android.volley.Request.Method.POST
 import com.android.volley.toolbox.Volley
+import kotlinx.android.synthetic.main.activity_main.*
 import org.jsoup.Connection
 import org.jsoup.Jsoup
 import org.jsoup.nodes.Element
@@ -108,6 +109,9 @@ class MainActivity : Activity() {
 
                 log("Timetable", timetable.toString())
 
+                runOnUiThread {
+                    list_view.adapter = TimetableListViewAdapter(timetable.weeks[0].days[0])
+                }
             }
         }
         thirdThread.start()
