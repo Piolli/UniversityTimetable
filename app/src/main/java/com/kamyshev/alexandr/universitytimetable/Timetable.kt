@@ -27,7 +27,11 @@ class Timetable {
         }
 
 
-        class Day(val lessons: MutableList<Lesson>) {
+        //Default is REST because in pager adapter use empty days for view data
+        class Day(val lessons: MutableList<Lesson>, var typeOfDay: TypeOfDay = TypeOfDay.REST) {
+
+            enum class TypeOfDay { STANDARD, REST }
+
             override fun toString(): String {
                 return "Day(lessons=${lessons.joinToString()})"
             }

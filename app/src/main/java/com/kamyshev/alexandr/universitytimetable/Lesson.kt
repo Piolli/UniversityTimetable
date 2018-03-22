@@ -15,7 +15,8 @@ class Lesson(
         val type: String = "",
         val office: String = "",
         val teacher: String = "",
-        val startTime: String = "") {
+        val startTime: String = "",
+        val endTime: String = "") {
 
     override fun toString(): String {
         return "Lesson(name='$name', type='$type', office='$office', teacher='$teacher', startTime='$startTime')\n"
