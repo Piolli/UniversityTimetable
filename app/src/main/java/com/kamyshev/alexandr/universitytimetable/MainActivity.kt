@@ -20,78 +20,59 @@ import android.view.*
 import android.widget.LinearLayout
 import android.widget.EditText
 import android.widget.FrameLayout
+import com.kamyshev.alexandr.universitytimetable.Timetable.Utils.getDayOfWeek
+import com.kamyshev.alexandr.universitytimetable.Timetable.Utils.getLessonsForWeek
+import com.kamyshev.alexandr.universitytimetable.Timetable.Utils.getNumberOfWeek
 
 
 class MainActivity : AppCompatActivity() {
 
-    var groupName = "БПИ16-01"
-
-    val userAgent = "Mozilla/5.0 (Windows NT 6.1; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/47.0.2526.111 Safari/537.36"
+    private var groupName = "БПИ16-01"
+    private val userAgent = "Mozilla/5.0 (Windows NT 6.1; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/47.0.2526.111 Safari/537.36"
+    private var cookies: Map<String, String>? = null
+    private var csfnToken = ""
+    private var groupLink = ""
+    private val timetableURL = "https://timetable.pallada.sibsau.ru/timetable/"
+    private val timetable = Timetable()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
-        val timetable = Timetable()
+        val firstThread = initCookies()
+        val secondThread = initGroupLink(firstThread)
 
-        val firstReq = Jsoup.connect("https://timetable.pallada.sibsau.ru/timetable/")
-                .method(Connection.Method.GET)
-                .userAgent(userAgent)
+        initTimetable(secondThread) {
+            toolbar.title = groupName
+            setSupportActionBar(toolbar)
 
-        var cookies: Map<String, String>? = null
-        var csfnToken = ""
-        var groupLink = ""
+            val dayOfWeek = getDayOfWeek()
+            val numberOfWeek = getNumberOfWeek()
+            log("DayOfWeek", dayOfWeek.toString())
+            log("numberOfWeek", numberOfWeek.toString())
 
-        val firstThread = Thread {
-            log("", "-------------FIRST REQUEST-------------")
+            val startPosition = (numberOfWeek * 7 + dayOfWeek)
 
-            val response = firstReq.execute()
+            val dayFragments = arrayOfNulls<TimetableDayFragment>(28)
+            var index = 0
+            repeat(2) {
+                for(day in timetable.weeks[0].days)
+                    dayFragments[index++] = TimetableDayFragment.createInstance(day)
 
-            log("statusMessage", response.statusMessage())
-            log("contentType", response.contentType())
-            log("statusCode", response.statusCode().toString())
-            log("cookies.values", response.cookies().values.joinToString())
-
-            cookies = response.cookies()
-
-            //Parse csfn_token
-            val htmlDoc = response.parse()
-            val csfn = htmlDoc.getElementsByAttributeValue("name", "csrf_token")
-            csfnToken = csfn.`val`()
-
-            log("CSRF", csfnToken)
-        }
-        firstThread.start()
-
-        val secondThread = Thread {
-            synchronized(firstThread) {
-                firstThread.join()
-
-                log("", "-------------SECOND REQUEST-------------")
-                val secondReq = Jsoup.connect("https://timetable.pallada.sibsau.ru/timetable/")
-                        .method(Connection.Method.POST)
-                        .userAgent(userAgent)
-                        .data("obj_search", "2")
-                        .data("search_text", groupName)
-                        .data("search_btn", "")
-                        .data("csrf_token", csfnToken)
-                        .cookies(cookies)
-
-                val response = secondReq.execute()
-                log("statusCode", response.statusCode().toString())
-
-                //Parse group link
-                val htmlDoc = response.parse()
-                groupLink = htmlDoc
-                        .getElementsByClass("list-unstyled search_list")
-                        .select("a")
-                        .attr("href")
-
-                log("groupLink", groupLink)
+                for(day in timetable.weeks[1].days)
+                    dayFragments[index++] = TimetableDayFragment.createInstance(day)
             }
-        }
-        secondThread.start()
 
+
+            pager.adapter = TimetableDayPagerAdapter(dayFragments, startPosition)
+            pager.currentItem = startPosition
+
+            tabs.setupWithViewPager(pager)
+        }
+
+    }
+
+    private fun initTimetable(secondThread: Thread, onCompleteThread: () -> Unit) {
         val thirdThread = Thread {
             synchronized(secondThread) {
                 secondThread.join()
@@ -116,68 +97,70 @@ class MainActivity : AppCompatActivity() {
                 timetable.weeks[0] = getLessonsForWeek(weekDoc0)
                 timetable.weeks[1] = getLessonsForWeek(weekDoc1)
 
-                log("Timetable", timetable.toString())
-
-                runOnUiThread {
-                    toolbar.title = groupName
-                    setSupportActionBar(toolbar)
-
-                    val dayOfWeek = getDayOfWeek()
-                    val numberOfWeek = getNumberOfWeek()
-                    log("DayOfWeek", dayOfWeek.toString())
-                    log("numberOfWeek", numberOfWeek.toString())
-
-//                    //Check if schedule days < today
-//                    if(dayOfWeek >= timetable.weeks[numberOfWeek].days.size || dayOfWeek == -1) {
-//                        message("Сегодня нет занятий")
-//                        return@runOnUiThread
-//                    }
-                    //TODO(perfomance of pager view)
-                    val startPosition = (numberOfWeek * 7 + dayOfWeek)
-
-                    val dayFragments = arrayOfNulls<TimetableDayFragment>(28)
-                    var index = 0
-                    repeat(2) {
-                        for(day in timetable.weeks[0].days)
-                            dayFragments[index++] = TimetableDayFragment.createInstance(day)
-
-                        for(day in timetable.weeks[1].days)
-                            dayFragments[index++] = TimetableDayFragment.createInstance(day)
-                    }
-
-
-                    pager.adapter = TimetableDayPagerAdapter(dayFragments, startPosition)
-                    pager.currentItem = startPosition
-
-                    tabs.setupWithViewPager(pager)
-
-//                    tabs.setScrollPosition(startPosition, 0f, false)
-//                    list_view.adapter = TimetableListViewAdapter(timetable.weeks[getNumberOfWeek()].days[getDayOfWeek()])
-                }
+                onCompleteThread.invoke()
             }
         }
         thirdThread.start()
-
     }
 
-    fun getLessonsForWeek(weekDoc: Element): Timetable.Week {
-        val resultWeek = Timetable.Week()
+    private fun initGroupLink(firstThread: Thread): Thread {
+        val secondThread = Thread {
+            synchronized(firstThread) {
+                firstThread.join()
 
-        //all_days[0] - monday
-        val all_days = weekDoc.getElementsByAttributeValueStarting("class", "row day")
+                log("", "-------------SECOND REQUEST-------------")
+                val secondReq = Jsoup.connect(timetableURL)
+                        .method(Connection.Method.POST)
+                        .userAgent(userAgent)
+                        .data("obj_search", "2")
+                        .data("search_text", groupName)
+                        .data("search_btn", "")
+                        .data("csrf_token", csfnToken)
+                        .cookies(cookies)
 
-        for(i in 0 until all_days.size) {
-            val lessonsDay = all_days[i].getElementsByClass("col-lg-10 col-md-10 col-sm-10 col-xs-10 discipline")
-            lessonsDay.forEach {
-                val parseLesson = parseLessonHtmlText(it)
-                resultWeek.days[i].lessons.add(parseLesson)
-                resultWeek.days[i].typeOfDay = Timetable.Week.Day.TypeOfDay.STANDARD
+                val response = secondReq.execute()
+                log("statusCode", response.statusCode().toString())
+
+                //Parse group link
+                val htmlDoc = response.parse()
+                groupLink = htmlDoc
+                        .getElementsByClass("list-unstyled search_list")
+                        .select("a")
+                        .attr("href")
+
+                log("groupLink", groupLink)
             }
         }
+        secondThread.start()
+        return secondThread
+    }
 
-        log("resultWeek SIZE", resultWeek.days.size.toString())
+    private fun initCookies(): Thread {
+        val firstReq = Jsoup.connect(timetableURL)
+                .method(Connection.Method.GET)
+                .userAgent(userAgent)
 
-        return resultWeek
+        val firstThread = Thread {
+            log("", "-------------FIRST REQUEST-------------")
+
+            val response = firstReq.execute()
+
+            log("statusMessage", response.statusMessage())
+            log("contentType", response.contentType())
+            log("statusCode", response.statusCode().toString())
+            log("cookies.values", response.cookies().values.joinToString())
+
+            cookies = response.cookies()
+
+            //Parse csfn_token
+            val htmlDoc = response.parse()
+            val csfn = htmlDoc.getElementsByAttributeValue("name", "csrf_token")
+            csfnToken = csfn.`val`()
+
+            log("CSRF", csfnToken)
+        }
+        firstThread.start()
+        return firstThread
     }
 
     override fun onCreateOptionsMenu(menu: Menu?): Boolean {
@@ -211,47 +194,9 @@ class MainActivity : AppCompatActivity() {
 
     }
 
-    fun parseLessonHtmlText(lesson: Element): Lesson {
-        val text = lesson.text().replace("(ЭЛЕКТИВНАЯ ДИСЦИПЛИНА)", "")
-        val name = text.substringBefore("(").trim()
-        val type = text.substringAfter("(").substringBeforeLast(")")
-        val office = text.substringAfterLast(")").substringBeforeLast(",")
-        val teacher = text.substringAfterLast(",")
-
-        val startTime = lesson.previousElementSibling().text()
-
-        return Lesson(name, type, office, teacher, startTime)
-    }
-
     fun log(title: String, message: String, logName: String = "RESPONSE") = Log.d(logName, title + " " + message)
 
     fun message(text: String) = Toast.makeText(this, text, Toast.LENGTH_LONG).show()
-
-    //0 or 1
-    fun getNumberOfWeek(date: Date = Date()): Int {
-        val calendar = GregorianCalendar.getInstance()
-        calendar.time = date
-
-        return (calendar.get(GregorianCalendar.WEEK_OF_YEAR) - 1) % 2
-    }
-
-    fun getDayOfWeek(date: Date = Date()): Int {
-        val calendar = GregorianCalendar.getInstance()
-        calendar.time = date
-
-        val dayOfWeek = calendar.get(GregorianCalendar.DAY_OF_WEEK)
-
-        return when(dayOfWeek) {
-            GregorianCalendar.MONDAY -> 0
-            GregorianCalendar.TUESDAY -> 1
-            GregorianCalendar.WEDNESDAY -> 2
-            GregorianCalendar.THURSDAY -> 3
-            GregorianCalendar.FRIDAY -> 4
-            GregorianCalendar.SATURDAY -> 5
-            GregorianCalendar.SUNDAY -> 6
-            else -> -1
-        }
-    }
 
     //TODO
     inner class TimetableDayPagerAdapter(private val fragments: Array<TimetableDayFragment?>,
